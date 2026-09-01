@@ -1,6 +1,10 @@
 import axios from 'axios';
 
-const client = axios.create({ baseURL: '/api' });
+// Same-origin '/api' works when a CDN layer stitches /api/* to the backend
+// (e.g. CloudFront -> ALB on the AWS path). On a split-domain deploy
+// (frontend on Cloudflare, backend on Render, no shared CDN layer) this must
+// be an absolute URL, supplied at build time via VITE_API_BASE_URL.
+const client = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '/api' });
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('pp_token');

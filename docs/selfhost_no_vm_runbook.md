@@ -113,12 +113,14 @@ once during initial setup; the stray worker was deleted by hand. `frontend/wrang
 has no `env` section on purpose — leave it that way, or add a matching
 `[env.production]` block first if `--env` is ever genuinely needed.
 
-**Required GitHub secrets** (Settings → Secrets and variables → Actions):
-- `CLOUDFLARE_API_TOKEN` — scoped to **Account → Workers Scripts → Edit**
-  (Pages permission alone is NOT sufficient — this is a Workers service, not
-  classic Pages, despite living under the same "Workers & Pages" dashboard
-  and originally being described as "Cloudflare Pages" during planning).
-- `CLOUDFLARE_ACCOUNT_ID` — `63c1d68768bb35d40aa524aef74c2d4c`.
+**Required GitHub configuration** (Settings → Secrets and variables → Actions):
+- **Secret** `CLOUDFLARE_API_TOKEN` — scoped to **Account → Workers Scripts →
+  Edit** (Pages permission alone is NOT sufficient — this is a Workers
+  service, not classic Pages, despite living under the same "Workers &
+  Pages" dashboard and originally being described as "Cloudflare Pages"
+  during planning).
+- **Variable** (not a secret — not sensitive) `CLOUDFLARE_ACCOUNT_ID` —
+  `63c1d68768bb35d40aa524aef74c2d4c`.
 
 `frontend/wrangler.jsonc`:
 ```json

@@ -1,0 +1,51 @@
+########################################################################
+# >>> ACTION REQUIRED BEFORE FIRST RUN <<<
+#
+# Replace `yourdomain.example` below with your REAL domain name, already
+# pointed (an A record) at this VM's public IP address.
+#
+# Caddy issues and renews HTTPS certificates automatically via Let's
+# Encrypt, but ONLY if this file has a real, publicly-resolvable domain
+# here — it cannot get a certificate for a placeholder, "localhost", or a
+# bare IP address. If you start this stack with the placeholder still in
+# place, Caddy will fail to obtain a certificate and HTTPS will not work.
+#
+#   1. yourdomain.example    -> your-real-domain.com   (do this now)
+#   2. Confirm DNS has propagated (`dig your-real-domain.com`) before
+#      starting the caddy service, or it will hit Let's Encrypt rate
+#      limits retrying against a domain that doesn't resolve yet.
+########################################################################
+
+yourdomain.example {
+	# --- API: reverse-proxy everything under /api/* to the backend ---
+	# The backend container is reached by its compose service name/port
+	# over the internal `portalpoint` network — not published to the host.
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	# --- Backend readiness passthrough (DB-backed SELECT 1 healthcheck) ---
+	handle /ready {
+		reverse_proxy backend:8000
+	}
+
+	# --- Backend liveness passthrough ---
+	handle /health {
+		reverse_proxy backend:8000
+	}
+
+	# --- SPA: serve the built frontend static files for everything else ---
+	handle {
+		root * /srv
+		encode gzip
+
+		# Client-side routing fallback: if the requested path doesn't match
+		# a real static file (or directory) under /srv, rewrite to
+		# /index.html so the React router (not Caddy) decides what to
+		# render. This is the Caddyfile equivalent of nginx's
+		# `try_files $uri /index.html`.
+		try_files {path} /index.html
+
+		file_server
+	}
+}

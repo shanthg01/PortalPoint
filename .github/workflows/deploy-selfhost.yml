@@ -1,0 +1,108 @@
+name: deploy-selfhost
+
+# Manual-only trigger, deliberately NOT mirroring deploy.yml's `push: branches: [main]`.
+# Rationale: this target is a single self-hosted VM stack that is still being stood up
+# in a parallel workstream (docker-compose.selfhost.yml / Caddyfile / MinIO-compat changes /
+# scripts/selfhost/*.sh) and is not guaranteed to exist or be reachable yet. During this
+# dual-hosting window the AWS ECS/S3/CloudFront path (deploy.yml) stays the sole
+# automatic-on-merge deploy target; this workflow is opt-in via workflow_dispatch so a
+# merge to main can never kick off a deploy attempt against an unconfigured/unreachable
+# VM and fail a run nobody asked for. Once the self-host VM is a real, always-on
+# secondary target (not just a testing stack), revisit adding a `push` trigger here —
+# but that's a decision to make later, deliberately, not a default to fall into now.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      # Ship only what the VM needs to build+run the stack: backend source, migrations,
+      # dependency lockfiles, the Dockerfile, the self-host compose file, Caddy's config,
+      # and the just-built static frontend bundle. No .git history, no notebooks/data,
+      # no docs — keeps the copy fast and the VM's disk footprint small.
+      - name: Copy application files to self-host VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SELFHOST_HOST }}
+          username: ${{ secrets.SELFHOST_USER }}
+          key: ${{ secrets.SELFHOST_SSH_PRIVATE_KEY }}
+          source: "src/,scripts/,alembic/,alembic.ini,pyproject.toml,uv.lock,Dockerfile,docker-compose.selfhost.yml,Caddyfile,frontend/dist/"
+          target: "/opt/portalpoint"
+          strip_components: 0
+
+      - name: Build compose images on VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SELFHOST_HOST }}
+          username: ${{ secrets.SELFHOST_USER }}
+          key: ${{ secrets.SELFHOST_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/portalpoint
+            docker compose -f docker-compose.selfhost.yml build
+
+      # Mirrors deploy.yml's ECS-migration-task safety ordering: migrations must succeed
+      # BEFORE the backend container is (re)started. `run --rm` starts a throwaway
+      # one-off container on the same compose network/env as `backend` but never touches
+      # the long-running service; a nonzero exit here fails ssh-action (script_stop: true
+      # plus the action's own exit-code propagation), which fails this job and stops the
+      # workflow before the "recreate containers" step ever runs — service stays untouched,
+      # same intent as deploy.yml's "abort deploy, service untouched" comment.
+      - name: Run DB migrations (must succeed before deploy)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SELFHOST_HOST }}
+          username: ${{ secrets.SELFHOST_USER }}
+          key: ${{ secrets.SELFHOST_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/portalpoint
+            docker compose -f docker-compose.selfhost.yml run --rm backend alembic upgrade head
+
+      - name: Recreate changed containers
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SELFHOST_HOST }}
+          username: ${{ secrets.SELFHOST_USER }}
+          key: ${{ secrets.SELFHOST_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/portalpoint
+            docker compose -f docker-compose.selfhost.yml up -d
+
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -sf -o /dev/null -w '%{http_code}' "https://${{ secrets.SELFHOST_DOMAIN }}/health" | grep -q '^200$'; then
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i: health check did not return 200, retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 5 attempts — deploy completed but service is not reporting healthy."
+          exit 1

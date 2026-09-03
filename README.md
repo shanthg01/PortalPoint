@@ -52,8 +52,8 @@ See [`docs/status/STATUS.md`](docs/status/STATUS.md) for the status index, or ju
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/shanthg01/MIDS210-Capstone.git
-cd MIDS210-Capstone
+git clone https://github.com/shanthg01/PortalPoint.git
+cd PortalPoint
 cp .env.example .env
 ```
 
@@ -364,7 +364,7 @@ All endpoints under `/api`. Public endpoints require no auth; protected endpoint
 ## Project Structure
 
 ```
-MIDS210-Capstone/
+PortalPoint/
 ├── src/portalpoint/
 │   ├── main.py                  # FastAPI app, CORS, router registration, /health
 │   ├── core/

@@ -1,0 +1,167 @@
+# docker-compose.selfhost.yml
+#
+# Self-hosted, single-VM replacement for the AWS stack (RDS + ElastiCache +
+# ECS Fargate + S3 + CloudFront) described in CLAUDE.md. Meant for
+# side-project scale: one VM, one `docker compose up -d`, no cloud
+# dependencies at all.
+#
+# BEFORE FIRST RUN:
+#   1. Copy .env.selfhost.example -> .env.selfhost and fill in every
+#      CHANGE_ME value (see that file's comments for footguns — several
+#      values MUST match each other byte-for-byte).
+#   2. Build the frontend static bundle so ./frontend/dist exists:
+#        cd frontend && npm install && npm run build
+#      (the caddy service bind-mounts this directory; it will fail to start,
+#      or serve nothing, if the directory doesn't exist yet.)
+#   3. Edit ./Caddyfile and replace `yourdomain.example` with your real
+#      domain, pointed at this VM's public IP, BEFORE starting caddy —
+#      otherwise Let's Encrypt cannot issue a certificate.
+#
+# Usage:
+#   docker compose -f docker-compose.selfhost.yml --env-file .env.selfhost up -d
+#   docker compose -f docker-compose.selfhost.yml --env-file .env.selfhost run --rm backend alembic upgrade head
+#
+# This file is independent of the dev-only docker-compose.yml at repo root
+# (which has the `local-db` profile) — do not merge them.
+
+networks:
+  portalpoint:
+    driver: bridge
+
+services:
+  postgres:
+    # pgvector/pgvector:pg15 = official Postgres 15 image with the pgvector
+    # extension preinstalled — matches CLAUDE.md's "PostgreSQL 15 + pg_vector"
+    # requirement without needing a custom Dockerfile. Pin the tag; don't
+    # float on `latest` for a database image.
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - portalpoint
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - portalpoint
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    # Ports 9000 (S3 API) / 9001 (console) are published here for local
+    # debugging convenience only. In the Caddy-facing setup, do NOT expose
+    # these to the public internet — only Caddy and the backend/mlflow
+    # services need to reach MinIO, and they do so over the internal
+    # `portalpoint` compose network via the `minio` service name, not via
+    # these host-published ports. Comment out (or firewall) the `ports:`
+    # block below for anything beyond single-VM local access.
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - portalpoint
+
+  # One-shot bucket bootstrap — MinIO does not auto-create buckets on boot.
+  # Runs `mc alias set` + `mc mb --ignore-existing` against the bucket named
+  # by S3_BUCKET, then exits. Safe to re-run (idempotent).
+  minio-init:
+    image: minio/mc
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" &&
+      mc mb --ignore-existing local/\"$$S3_BUCKET\"
+      "
+    networks:
+      - portalpoint
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.selfhost
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      # Persists MLFLOW_TRACKING_URI's sqlite db (and any other local state
+      # under /app/data) across container restarts/recreates.
+      - mlflow_data:/app/data
+    # No `ports:` — only caddy reaches this, over the internal compose
+    # network at backend:8000. Do not publish 8000 to the host here.
+    networks:
+      - portalpoint
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddyfile:ro
+      # Built frontend static output. This directory does NOT exist until
+      # someone runs `npm run build` inside frontend/ — see the note at the
+      # top of this file.
+      - ./frontend/dist:/srv:ro
+      # Persist ACME account state + issued certs across restarts so Caddy
+      # doesn't re-request from Let's Encrypt every time the container
+      # recreates.
+      - caddy_data:/data
+      - caddy_config:/config
+    command: ["caddy", "run", "--config", "/etc/caddyfile", "--adapter", "caddyfile"]
+    depends_on:
+      - backend
+    networks:
+      - portalpoint
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  mlflow_data:
+  caddy_data:
+  caddy_config:

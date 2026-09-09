@@ -63,17 +63,29 @@ def get_bucket() -> str:
     return os.environ.get("S3_BUCKET") or _load_env().get("S3_BUCKET", "portalpoint-data")
 
 
-def get_s3_client():
-    """Return a boto3 S3 client authenticated via .env credentials."""
+def get_s3_client(endpoint_url: str | None = None):
+    """Return a boto3 S3 client authenticated via .env credentials.
+
+    `endpoint_url` defaults to the `AWS_S3_ENDPOINT_URL` env var (checked in
+    `os.environ` first, then `.env`'s dict — same precedence as the other
+    AWS_* vars in this file) when not passed explicitly. Only needed for a
+    self-hosted MinIO deploy; leave unset for the real AWS-hosted path, in
+    which case this is `None` and behaves exactly as before this option
+    existed (boto3 treats `endpoint_url=None` identically to the parameter
+    being omitted — it falls through to the default AWS endpoint resolution).
+    """
     import boto3  # type: ignore
 
     ensure_aws_env()
     env = _load_env()
+    if endpoint_url is None:
+        endpoint_url = os.environ.get("AWS_S3_ENDPOINT_URL") or env.get("AWS_S3_ENDPOINT_URL")
     return boto3.client(
         "s3",
         aws_access_key_id=env.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=env.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY"),
         region_name=env.get("AWS_DEFAULT_REGION", "us-east-1"),
+        endpoint_url=endpoint_url or None,
     )
 
 

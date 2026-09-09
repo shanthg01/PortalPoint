@@ -1,0 +1,79 @@
+name: deploy-cloudflare-frontend
+
+# Separate from deploy.yml (AWS: S3 + CloudFront) -- this deploys the same
+# frontend to the no-VM/zero-cost stack's Cloudflare Workers static-asset
+# service instead. The two paths are dual-hosted and independently
+# triggerable; this one does not touch AWS, deploy.yml does not touch
+# Cloudflare.
+#
+# Render (backend) already auto-deploys on push to main via its own git
+# integration (see docs/selfhost_no_vm_runbook.md) -- no GitHub Actions step
+# needed for that half. This workflow only covers the frontend, because its
+# Cloudflare Workers service was created via a manual `wrangler deploy`
+# (confirmed via the Workers API: last_deployed_from was empty, no
+# Cloudflare-managed git build integration) -- so without this workflow, a
+# frontend change never reaches the no-VM site until someone runs the
+# rebuild-and-deploy sequence by hand.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-cloudflare-frontend.yml"
+  workflow_dispatch: {}
+
+env:
+  # Public URL, not a secret -- the live Render backend for the no-VM stack.
+  # Update this if the Render service is ever recreated under a new URL.
+  VITE_API_BASE_URL: "https://portalpoint.onrender.com/api"
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+        # VITE_API_BASE_URL is read from the job-level env above -- Vite
+        # bakes it into the JS bundle at this step, not at deploy time.
+        # This is the exact bug this workflow exists to prevent: the
+        # bundle must be built with the right value BEFORE wrangler
+        # uploads it, since Cloudflare has no build step of its own here.
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: frontend
+          command: deploy
+          # No --env flag: the "portalpoint" service's default environment
+          # IS production (Cloudflare dashboard shows this as metadata, not
+          # a wrangler [env.production] block). Passing --env production
+          # here with no matching config section creates a SEPARATE new
+          # worker (portalpoint-production) instead of updating the real
+          # one -- this happened once already during manual setup, the
+          # stray worker was deleted by hand. Do not add --env back.
+
+      - name: Verify deploy
+        run: |
+          sleep 5
+          BUNDLE=$(curl -s https://portalpoint.shanthg01.workers.dev/ | grep -o 'assets/index-[^"]*\.js' | head -1)
+          curl -s "https://portalpoint.shanthg01.workers.dev/$BUNDLE" | grep -q "portalpoint.onrender.com" \
+            && echo "OK: deployed bundle points at the Render backend" \
+            || (echo "FAIL: deployed bundle does not reference the backend URL" && exit 1)

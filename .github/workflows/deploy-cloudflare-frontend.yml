@@ -102,8 +102,23 @@ jobs:
 
       - name: Verify deploy
         run: |
-          sleep 5
-          BUNDLE=$(curl -s https://portalpoint.shanthg01.workers.dev/ | grep -o 'assets/index-[^"]*\.js' | head -1)
-          curl -s "https://portalpoint.shanthg01.workers.dev/$BUNDLE" | grep -q "portalpoint.onrender.com" \
-            && echo "OK: deployed bundle points at the Render backend" \
-            || (echo "FAIL: deployed bundle does not reference the backend URL" && exit 1)
+          # Retry loop, not a single sleep+check -- a real false-negative was
+          # hit 2026-09-09: sleep 5 wasn't enough for the deploy to
+          # propagate to every edge PoP, so this step failed the job even
+          # though the deploy was actually correct and (confirmed minutes
+          # later) stayed correct. Also: Cloudflare's own native
+          # GitHub-connected build races this workflow on every push to main
+          # (see the file-level warning above) -- if IT deploys last, this
+          # loop will correctly catch a genuinely broken live site, not just
+          # a propagation-timing artifact.
+          for i in $(seq 1 6); do
+            sleep 10
+            BUNDLE=$(curl -s https://portalpoint.shanthg01.workers.dev/ | grep -o 'assets/index-[^"]*\.js' | head -1)
+            if curl -s "https://portalpoint.shanthg01.workers.dev/$BUNDLE" | grep -q "portalpoint.onrender.com"; then
+              echo "OK: deployed bundle points at the Render backend (attempt $i)"
+              exit 0
+            fi
+            echo "attempt $i: not yet correct, retrying..."
+          done
+          echo "FAIL: deployed bundle does not reference the backend URL after 60s"
+          exit 1

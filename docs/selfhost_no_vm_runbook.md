@@ -145,17 +145,48 @@ GitHub workflow; env var changes were applied ad hoc.
 
 ## Frontend (Cloudflare Workers)
 
-This project was deployed manually (`wrangler deploy`), not through
-Cloudflare's git-integrated build pipeline — confirmed via the Workers API
-(`last_deployed_from` was empty). That matters because Vite bakes
-`VITE_API_BASE_URL` into the JS bundle at **build time**, on whichever
-machine runs `npm run build` — Cloudflare never runs a build here, so a
-dashboard/API env var setting would be a no-op. The value must be set before
-every build.
+This project was deployed manually (`wrangler deploy`) at first — confirmed
+at the time via the Workers API (`last_deployed_from` was empty). That
+matters because Vite bakes `VITE_API_BASE_URL` into the JS bundle at
+**build time**, on whichever machine runs `npm run build` — Cloudflare's
+own build pipeline, if it runs at all, doesn't know this variable exists,
+so a dashboard/API env var setting for it would be a no-op there anyway.
 
-**Redeploy:** automatic via `.github/workflows/deploy-cloudflare-frontend.yml`
-on every push to `main` touching `frontend/**`, or manually via
-`workflow_dispatch`.
+**⚠️ Real incident (2026-09-09): Cloudflare's own native GitHub-connected
+"Workers Builds" is ALSO active for this service and fires on every push to
+`main`, independent of anything in this repo.** Confirmed via the Workers
+API version history: a version with `source: "wrangler"` was created ~48
+seconds after a merge to `main` — far too fast to be our own GitHub Actions
+workflow below (which takes 3+ minutes just to reach its deploy step).
+Because it doesn't set `VITE_API_BASE_URL`, it silently deploys a **broken**
+bundle (reverts to the relative `/api` bug this whole setup exists to
+prevent) on every single push to `main` that touches the frontend. This was
+caught and fixed live by manually redeploying a correct local build; it will
+recur on the next push until Cloudflare's native build is disconnected —
+**dashboard → Workers & Pages → portalpoint → Settings → Build → disconnect
+the repository.** No API path to do this was found from the command line;
+it needs to be done from the dashboard directly. Until then, treat every
+push to `main` touching `frontend/**` as needing a manual post-merge
+verification (see the bundle-hash check below) — don't assume the earlier
+"no git integration" note above still holds.
+
+**Redeploy:** intended to be automatic via
+`.github/workflows/deploy-cloudflare-frontend.yml` on every push to `main`
+touching `frontend/**`, or manually via `workflow_dispatch` — but see the
+warning above: as of 2026-09-09 this races against Cloudflare's own native
+build, and whichever finishes last wins. Also pin `wranglerVersion` in that
+workflow's `cloudflare/wrangler-action` step (real failure hit 2026-09-09:
+left unpinned, it auto-installed Wrangler 3.90.0, which doesn't understand
+an assets-only `wrangler.jsonc` with no `main` field — "Missing entry-point"
+— and failed the whole job outright).
+
+**Verifying a deploy actually took** (run after any push to `main` touching
+`frontend/**`, don't just trust a green check):
+```bash
+JSFILE=$(curl -s https://portalpoint.shanthg01.workers.dev/ | grep -o 'assets/index-[^"]*\.js' | head -1)
+curl -s "https://portalpoint.shanthg01.workers.dev/$JSFILE" | grep -q "portalpoint.onrender.com" \
+  && echo OK || echo "BROKEN -- redeploy manually, see fallback below"
+```
 
 **Manual fallback** (if you ever need to deploy without GitHub Actions):
 ```powershell

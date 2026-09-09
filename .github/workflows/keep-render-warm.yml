@@ -5,14 +5,26 @@ name: keep-render-warm
 # login/page loads feel "stuck" after any quiet period (confirmed via direct
 # timing: warm-state requests are consistently <0.3s across health, DB-backed,
 # and heavy-query endpoints alike -- the backend itself isn't slow, idle
-# spin-down is). Pinging /health well inside that 15min window keeps the
-# container from ever going idle long enough to spin down. No cost, no
-# third-party account needed (cron-job.org/UptimeRobot would work too, but
-# this keeps it in-repo and visible in Actions history).
+# spin-down is). Pinging /health well inside that 15min window is meant to
+# keep the container from ever going idle long enough to spin down.
+#
+# ⚠️ Real reliability problem found (2026-09-09): GitHub's `schedule` trigger
+# is best-effort, not a real cron daemon -- in practice this fired only
+# twice in the first several hours after being merged, ~2h34min apart, each
+# time timing out (curl's own --max-time) because the container had gone
+# cold far longer than the intended 15min window. GitHub's own docs only
+# describe "might be delayed during high load," not multi-hour gaps -- this
+# is worse than documented, and changing the schedule alone may not fully
+# fix it. Bumped to */5 (GitHub's documented minimum granularity) as a
+# real, testable attempt, and widened the timeout so a ping that does land
+# on a genuinely cold container doesn't fail outright. If GH's scheduler
+# still can't hold a tight enough cadence, the real fix is an external
+# uptime monitor (cron-job.org / UptimeRobot free tier) -- those are built
+# for reliable frequent pings, GH Actions schedule explicitly is not.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -21,7 +33,7 @@ jobs:
     steps:
       - name: Ping backend health endpoint
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://portalpoint.onrender.com/health)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 https://portalpoint.onrender.com/health)
           echo "Response: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "::warning::Health check returned $STATUS instead of 200"

@@ -56,7 +56,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Wrangler 4.130.0 (pinned below) requires Node >=22 -- real
+          # failure (2026-09-09): left at 20, wrangler-action installed
+          # 4.130.0 anyway (per the pin) then refused to run ("Wrangler
+          # requires at least Node.js v22.0.0"), failing the job after
+          # already having built successfully -- a second, different
+          # failure mode from the original Wrangler-3-vs-assets-only-config
+          # one the pin below was added for.
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 

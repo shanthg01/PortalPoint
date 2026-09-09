@@ -8,12 +8,28 @@ name: deploy-cloudflare-frontend
 #
 # Render (backend) already auto-deploys on push to main via its own git
 # integration (see docs/selfhost_no_vm_runbook.md) -- no GitHub Actions step
-# needed for that half. This workflow only covers the frontend, because its
-# Cloudflare Workers service was created via a manual `wrangler deploy`
-# (confirmed via the Workers API: last_deployed_from was empty, no
-# Cloudflare-managed git build integration) -- so without this workflow, a
-# frontend change never reaches the no-VM site until someone runs the
-# rebuild-and-deploy sequence by hand.
+# needed for that half. This workflow covers the frontend.
+#
+# WARNING (found 2026-09-09, real incident): Cloudflare's own native
+# GitHub-connected "Workers Builds" ALSO fires on push to main for this
+# service, independent of this workflow -- confirmed via the Workers API
+# version history (a version with source="wrangler" appeared ~48s after a
+# merge, far too fast to be this workflow, which takes 3+ min to reach its
+# deploy step). It does NOT set VITE_API_BASE_URL (that's not a Workers
+# runtime var, it's a Vite build-time value with no equivalent in
+# Cloudflare's build UI as configured), so it silently deploys a BROKEN
+# bundle (relative '/api' baseURL, same bug this workflow exists to
+# prevent) on every push to main -- confirmed live, had to be manually
+# fixed via a local `wrangler deploy` with the correct env var set. This
+# earlier comment previously said no such integration existed
+# ("last_deployed_from was empty") -- that was true for the ORIGINAL
+# manual deploy, not proof no git integration was ever connected since.
+# **Disconnect Cloudflare's native build for this service** (dashboard ->
+# Workers & Pages -> portalpoint -> Settings -> Build) so this workflow is
+# the only thing that ever deploys it -- not done yet as of this comment,
+# could not find an API path to do it from here. Until that's done, ANY
+# push to main touching frontend/** risks a race between this workflow and
+# Cloudflare's own build; whichever finishes last wins.
 
 on:
   push:
@@ -62,6 +78,13 @@ jobs:
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: frontend
           command: deploy
+          # Real failure (2026-09-09): left unpinned, the action auto-installs
+          # whatever it considers "compatible" -- picked Wrangler 3.90.0,
+          # which doesn't understand an assets-only wrangler.jsonc with no
+          # `main` field ("Missing entry-point" error, job failed outright).
+          # That's a Wrangler 4+ capability. Pin explicitly so this doesn't
+          # silently regress again on some future wrangler-action default change.
+          wranglerVersion: "4.130.0"
           # No --env flag: the "portalpoint" service's default environment
           # IS production (Cloudflare dashboard shows this as metadata, not
           # a wrangler [env.production] block). Passing --env production

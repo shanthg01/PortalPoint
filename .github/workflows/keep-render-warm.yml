@@ -1,0 +1,28 @@
+name: keep-render-warm
+
+# Render's free Web Service tier spins the container down after ~15min idle,
+# then takes ~30-50s to wake on the next real request -- this is what made
+# login/page loads feel "stuck" after any quiet period (confirmed via direct
+# timing: warm-state requests are consistently <0.3s across health, DB-backed,
+# and heavy-query endpoints alike -- the backend itself isn't slow, idle
+# spin-down is). Pinging /health well inside that 15min window keeps the
+# container from ever going idle long enough to spin down. No cost, no
+# third-party account needed (cron-job.org/UptimeRobot would work too, but
+# this keeps it in-repo and visible in Actions history).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health endpoint
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://portalpoint.onrender.com/health)
+          echo "Response: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::warning::Health check returned $STATUS instead of 200"
+          fi

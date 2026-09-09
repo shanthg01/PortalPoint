@@ -1,23 +1,37 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { createTheme, ThemeProvider, CssBaseline } from '@mui/material';
+import { createTheme, ThemeProvider, CssBaseline, Box, CircularProgress } from '@mui/material';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppLayout from './components/AppLayout';
-import LoginPage from './pages/LoginPage';
-import SignupPage from './pages/SignupPage';
-import DashboardPage from './pages/DashboardPage';
-import PlayerSearchPage from './pages/PlayerSearchPage';
-import PlayerProfilePage from './pages/PlayerProfilePage';
-import PipelinePage from './pages/PipelinePage';
-import FitScorePage from './pages/FitScorePage';
-import ComparePage from './pages/ComparePage';
-import SettingsPage from './pages/SettingsPage';
-import OverviewPage from './pages/OverviewPage';
-import GlossaryPage from './pages/GlossaryPage';
-import RosterImpactPage from './pages/RosterImpactPage';
-import AgentActivityPage from './pages/AgentActivityPage';
+
+// Route-level code splitting — the whole app previously shipped as one ~812KB
+// JS chunk (real Vite build warning), so every page load downloaded/parsed
+// every page's code regardless of which one was actually visited. Each page
+// below is now its own chunk, fetched on first navigation to that route.
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const SignupPage = lazy(() => import('./pages/SignupPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const PlayerSearchPage = lazy(() => import('./pages/PlayerSearchPage'));
+const PlayerProfilePage = lazy(() => import('./pages/PlayerProfilePage'));
+const PipelinePage = lazy(() => import('./pages/PipelinePage'));
+const FitScorePage = lazy(() => import('./pages/FitScorePage'));
+const ComparePage = lazy(() => import('./pages/ComparePage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const OverviewPage = lazy(() => import('./pages/OverviewPage'));
+const GlossaryPage = lazy(() => import('./pages/GlossaryPage'));
+const RosterImpactPage = lazy(() => import('./pages/RosterImpactPage'));
+const AgentActivityPage = lazy(() => import('./pages/AgentActivityPage'));
+
+function RouteLoadingFallback() {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+      <CircularProgress />
+    </Box>
+  );
+}
 
 // Soft slate-navy: lifted from near-black so tables/cards read clearly while
 // keeping the dark sports-analytics feel and the orange/blue accents.
@@ -306,31 +320,33 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <BrowserRouter>
-            <Routes>
-              {/* Public */}
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/signup" element={<SignupPage />} />
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <Routes>
+                {/* Public */}
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
 
-              {/* Protected — share AppLayout shell */}
-              <Route element={<ProtectedRoute />}>
-                <Route element={<AppLayout />}>
-                  <Route path="/overview" element={<OverviewPage />} />
-                  <Route path="/glossary" element={<GlossaryPage />} />
-                  <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/players/search" element={<PlayerSearchPage />} />
-                  <Route path="/players/:id" element={<PlayerProfilePage />} />
-                  <Route path="/pipeline" element={<PipelinePage />} />
-                  <Route path="/fit/:player_id" element={<FitScorePage />} />
-                  <Route path="/compare" element={<ComparePage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="/roster-impact" element={<RosterImpactPage />} />
-                  <Route path="/agent-activity" element={<AgentActivityPage />} />
+                {/* Protected — share AppLayout shell */}
+                <Route element={<ProtectedRoute />}>
+                  <Route element={<AppLayout />}>
+                    <Route path="/overview" element={<OverviewPage />} />
+                    <Route path="/glossary" element={<GlossaryPage />} />
+                    <Route path="/dashboard" element={<DashboardPage />} />
+                    <Route path="/players/search" element={<PlayerSearchPage />} />
+                    <Route path="/players/:id" element={<PlayerProfilePage />} />
+                    <Route path="/pipeline" element={<PipelinePage />} />
+                    <Route path="/fit/:player_id" element={<FitScorePage />} />
+                    <Route path="/compare" element={<ComparePage />} />
+                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/roster-impact" element={<RosterImpactPage />} />
+                    <Route path="/agent-activity" element={<AgentActivityPage />} />
+                  </Route>
                 </Route>
-              </Route>
 
-              {/* Fallback */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </Suspense>
           </BrowserRouter>
         </AuthProvider>
       </QueryClientProvider>

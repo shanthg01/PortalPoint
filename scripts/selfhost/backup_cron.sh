@@ -22,6 +22,9 @@
 #      endpoint (e.g. Backblaze B2's S3-compatible API, or another MinIO/S3-compatible
 #      target). If any BACKUP_REMOTE_* var is unset, the off-site push is skipped and this is
 #      logged clearly — it is NOT a fatal error, local-only backup still counts as success.
+#   4. Remote retention (only runs if step 3 ran): same "keep last N, delete older" policy as
+#      step 2, applied to the off-site bucket via $BACKUP_REMOTE_RETAIN_COUNT — without this,
+#      off-site storage grows forever since step 3 only ever adds objects.
 #
 # REQUIRED ENV VARS (self-hosted Postgres connection to back up)
 #   SELFHOST_DB_NAME        Database name
@@ -47,6 +50,16 @@
 #   BACKUP_REMOTE_SECRET_KEY     Off-site secret access key.
 #   BACKUP_REMOTE_MC_ALIAS       Local `mc` alias name to register for the off-site target.
 #                                Default: offsite
+#   BACKUP_REMOTE_RETAIN_COUNT   Number of most-recent dumps to keep in the off-site bucket,
+#                                same "keep last N, delete older" policy as BACKUP_RETAIN_COUNT
+#                                but applied remotely. Default: 3 -- deliberately lower than the
+#                                local default (7). Real incident (2026-09-11): with no remote
+#                                retention at all, 4 uncleaned dumps at ~2.57GB each already
+#                                exceeded Backblaze B2's 10GB free tier after only 2 days of the
+#                                nightly cron running. At 3 retained (~7.7GB at today's dump
+#                                size), there's headroom for the DB to grow before hitting the
+#                                cap again -- lower this further (or raise it if paying for
+#                                storage) if the dump size grows materially.
 #
 # FLAGS
 #   -h, --help              Print this help and exit 0.
@@ -93,6 +106,7 @@ SELFHOST_DB_PORT="${SELFHOST_DB_PORT:-5432}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_RETAIN_COUNT="${BACKUP_RETAIN_COUNT:-7}"
 BACKUP_REMOTE_MC_ALIAS="${BACKUP_REMOTE_MC_ALIAS:-offsite}"
+BACKUP_REMOTE_RETAIN_COUNT="${BACKUP_REMOTE_RETAIN_COUNT:-3}"
 
 missing=()
 for var in SELFHOST_DB_NAME SELFHOST_DB_USER SELFHOST_DB_PASSWORD; do
@@ -109,6 +123,11 @@ fi
 
 if ! [[ "$BACKUP_RETAIN_COUNT" =~ ^[0-9]+$ ]] || [[ "$BACKUP_RETAIN_COUNT" -lt 1 ]]; then
   echo "ERROR: BACKUP_RETAIN_COUNT must be a positive integer (got '${BACKUP_RETAIN_COUNT}')." >&2
+  exit 1
+fi
+
+if ! [[ "$BACKUP_REMOTE_RETAIN_COUNT" =~ ^[0-9]+$ ]] || [[ "$BACKUP_REMOTE_RETAIN_COUNT" -lt 1 ]]; then
+  echo "ERROR: BACKUP_REMOTE_RETAIN_COUNT must be a positive integer (got '${BACKUP_REMOTE_RETAIN_COUNT}')." >&2
   exit 1
 fi
 
@@ -182,5 +201,25 @@ mc alias set "$BACKUP_REMOTE_MC_ALIAS" "$BACKUP_REMOTE_ENDPOINT" "$BACKUP_REMOTE
 
 log "Pushing ${DUMP_FILE} -> ${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/"
 mc cp "$DUMP_FILE" "${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/"
+
+# ---- step 4: remote retention — keep the last N dumps off-site, delete older ones ------------
+# `mc cp` above only ever adds objects — with no cleanup here, off-site storage grows forever.
+# Real incident (2026-09-11): 4 unpruned dumps at ~2.57GB each already exceeded Backblaze B2's
+# 10GB free tier after 2 days of the nightly cron running, since only local retention existed.
+log "Applying remote retention policy: keep last ${BACKUP_REMOTE_RETAIN_COUNT} dump(s) in ${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}"
+mapfile -t remote_dumps < <(mc find "${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/" \
+  --name 'portalpoint_*.dump' 2>/dev/null | sort)
+total_remote_dumps="${#remote_dumps[@]}"
+
+if [[ "$total_remote_dumps" -gt "$BACKUP_REMOTE_RETAIN_COUNT" ]]; then
+  num_to_delete=$((total_remote_dumps - BACKUP_REMOTE_RETAIN_COUNT))
+  log "Found ${total_remote_dumps} remote dump(s), deleting ${num_to_delete} oldest to retain ${BACKUP_REMOTE_RETAIN_COUNT}."
+  for ((i = 0; i < num_to_delete; i++)); do
+    log "Deleting old off-site backup: ${remote_dumps[$i]}"
+    mc rm "${remote_dumps[$i]}"
+  done
+else
+  log "Found ${total_remote_dumps} remote dump(s), within retention limit of ${BACKUP_REMOTE_RETAIN_COUNT}. Nothing deleted."
+fi
 
 log "Off-site push complete. Backup finished: ${DUMP_FILE}"

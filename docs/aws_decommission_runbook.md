@@ -9,7 +9,9 @@ old site on 2026-09-21, which you decided not to copy). Step 3b done (EFS MLflow
 keys copied into local `.env`). **The old CloudFront URL now 301-redirects everything to
 the Workers URL** (`redirect_to` in `infra/aws/variables.tf`) instead of being disabled, because people were
 still logging into the old site as of 2026-09-29. Step 3c: skip if the team-rating what-if works on the
-new stack. Next: Step 4 (the scream test minus CloudFront), which you run yourself (see below).
+new stack. **Step 4 scream test started 2026-09-30:** ECS at 0, bastion + RDS stopped, ElastiCache
+and NAT deleted, all confirmed settled; the new stack was verified healthy afterwards. **RDS auto-restarts on
+~2026-10-07** (AWS's 7-day stop limit), so run Step 5 before then or stop it again. Earliest Step 5: 2026-10-02/03.
 
 This finishes the platform migration in `docs/selfhost_no_vm_runbook.md`: shut down the AWS stack
 (ECS/ALB/RDS/ElastiCache/EFS/CloudFront/S3) now that the free-tier stack (Render + Cloudflare Workers

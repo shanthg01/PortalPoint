@@ -54,7 +54,22 @@ resource "aws_cloudfront_function" "spa_routing" {
   code = replace(file("${path.module}/../../docs/cloudfront-spa-routing-function.js"), "\r\n", "\n")
 }
 
+# Decommission mode (var.redirect_to set): one viewer-request function 301s every
+# path -- app and /api -- to the new frontend, and the ALB origin + /api route
+# are dropped so CloudFront no longer depends on the backend (ECS/ALB/RDS can be
+# destroyed while this keeps old links working). Set redirect_to = null on a
+# rebuild to get normal SPA serving back.
+resource "aws_cloudfront_function" "redirect" {
+  count   = local.redirect ? 1 : 0
+  name    = "portalpoint-decommission-redirect"
+  runtime = "cloudfront-js-2.0"
+  comment = "301 everything to the new PortalPoint frontend"
+  code    = replace(file("${path.module}/functions/redirect.js"), "__TARGET__", var.redirect_to)
+}
+
 locals {
+  redirect = var.redirect_to != null
+
   # AWS managed policies
   cache_policy_caching_optimized = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   cache_policy_caching_disabled  = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
@@ -75,14 +90,17 @@ resource "aws_cloudfront_distribution" "main" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
-  origin {
-    origin_id   = "alb-backend"
-    domain_name = aws_lb.main.dns_name
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "http-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
+  dynamic "origin" {
+    for_each = local.redirect ? [] : [1]
+    content {
+      origin_id   = "alb-backend"
+      domain_name = aws_lb.main.dns_name
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "http-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
     }
   }
 
@@ -96,19 +114,22 @@ resource "aws_cloudfront_distribution" "main" {
 
     function_association {
       event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.spa_routing.arn
+      function_arn = local.redirect ? aws_cloudfront_function.redirect[0].arn : aws_cloudfront_function.spa_routing.arn
     }
   }
 
-  ordered_cache_behavior {
-    path_pattern             = "/api/*"
-    target_origin_id         = "alb-backend"
-    viewer_protocol_policy   = "https-only"
-    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods           = ["GET", "HEAD"]
-    compress                 = true
-    cache_policy_id          = local.cache_policy_caching_disabled
-    origin_request_policy_id = local.origin_request_all_except_host
+  dynamic "ordered_cache_behavior" {
+    for_each = local.redirect ? [] : [1]
+    content {
+      path_pattern             = "/api/*"
+      target_origin_id         = "alb-backend"
+      viewer_protocol_policy   = "https-only"
+      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods           = ["GET", "HEAD"]
+      compress                 = true
+      cache_policy_id          = local.cache_policy_caching_disabled
+      origin_request_policy_id = local.origin_request_all_except_host
+    }
   }
 
   restrictions {

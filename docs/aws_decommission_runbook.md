@@ -3,7 +3,13 @@
 **Status (2026-09-30):** Steps 1, 2 and 2b done. Step 1 is on branch `aws-decommission`
 (`deploy.yml` disabled on GitHub). Step 2 inventory results are below. Step 2b: 70 resources imported into
 `infra/aws/`, final `terraform plan` = **No changes**. Nothing in AWS has been modified or deleted yet.
-Next: Step 0's remaining gates, then Step 3.
+**Later same day:** Step 3a done (40/42 tables identical; only gap: 1 user who signed up on the
+old site on 2026-09-21, which you decided not to copy). Step 3b done (EFS MLflow store backed up to
+`Desktop/MIDS/portalpoint_aws_backups/`; only 6 experiments/8 runs, no registry). Step 3d done (Tavily/Gemini
+keys copied into local `.env`). **The old CloudFront URL now 301-redirects everything to
+the Workers URL** (`redirect_to` in `infra/aws/variables.tf`) instead of being disabled, because people were
+still logging into the old site as of 2026-09-29. Step 3c: skip if the team-rating what-if works on the
+new stack. Next: Step 4 (the scream test minus CloudFront), which you run yourself (see below).
 
 This finishes the platform migration in `docs/selfhost_no_vm_runbook.md`: shut down the AWS stack
 (ECS/ALB/RDS/ElastiCache/EFS/CloudFront/S3) now that the free-tier stack (Render + Cloudflare Workers
@@ -252,10 +258,8 @@ can still be undone.
 # Backend to zero tasks (restore: --desired-count 1)
 aws ecs update-service --cluster portalpoint-prod --service portalpoint-backend --desired-count 0
 
-# Disable CloudFront (restore: flip Enabled back to true)
-aws cloudfront get-distribution-config --id E2HF7HKH8Y1FKD > cf.json
-ETAG=$(jq -r .ETag cf.json); jq '.DistributionConfig.Enabled=false | .DistributionConfig' cf.json > cf-disabled.json
-aws cloudfront update-distribution --id E2HF7HKH8Y1FKD --if-match "$ETAG" --distribution-config file://cf-disabled.json
+# CloudFront: NOT disabled. It already 301-redirects to the new site (done 2026-09-30) and no longer
+# depends on the ALB, so it keeps old links working while the backend is torn down.
 
 # Stop (not terminate) the bastion; stop RDS (auto-restarts after 7 days, so this window caps at 7)
 aws ec2 stop-instances --instance-ids i-0a6e1bafc1cb6f379

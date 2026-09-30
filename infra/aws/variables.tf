@@ -74,3 +74,9 @@ variable "rds_restore_snapshot_identifier" {
   type        = string
   default     = null
 }
+
+variable "redirect_to" {
+  description = "Decommission mode: 301 all CloudFront traffic to this origin (no trailing slash). null = normal SPA + /api serving (use for a rebuild)."
+  type        = string
+  default     = "https://portalpoint.shanthg01.workers.dev"
+}

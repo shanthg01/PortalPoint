@@ -9,9 +9,18 @@ Data-driven transfer portal scouting platform for college basketball programs. C
 
 ## Live Site
 
-**https://d331zwrxbrp79d.cloudfront.net** — production deployment, live as of 2026-07-20. Frontend on
-S3+CloudFront, backend on ECS Fargate, real RDS database. See
-[`docs/road_to_production.md`](docs/road_to_production.md) for the full deployment writeup.
+**https://portalpoint.shanthg01.workers.dev** — frontend on Cloudflare Workers, backend on Render
+(`https://portalpoint.onrender.com`), Postgres + pgvector on a self-hosted free-tier VM, Redis on
+Upstash, object storage on Backblaze B2. See
+[`docs/selfhost_no_vm_runbook.md`](docs/selfhost_no_vm_runbook.md) for the deployment writeup.
+
+The backend is on Render's free tier, so the first request after ~15 minutes idle takes ~30-50s
+(cold start).
+
+The original AWS deployment (S3+CloudFront, ECS Fargate, RDS, live 2026-07-20) is being
+decommissioned and preserved as Terraform. See
+[`docs/aws_decommission_runbook.md`](docs/aws_decommission_runbook.md) and, for history,
+[`docs/road_to_production.md`](docs/road_to_production.md).
 
 ---
 
@@ -182,6 +191,8 @@ Copy `.env.example` to `.env`. All variables have sane defaults for local Docker
 
 ## Team RDS access (AWS)
 
+> **Being decommissioned.** The AWS stack is being shut down (see [`docs/aws_decommission_runbook.md`](docs/aws_decommission_runbook.md)); this section works only until RDS is deleted. The live app now uses the self-hosted stack in [`docs/selfhost_no_vm_runbook.md`](docs/selfhost_no_vm_runbook.md).
+
 Shared PostgreSQL 15 database on AWS RDS. All teammates connect to the same instance — through an SSM Session Manager port-forwarding tunnel to a bastion host, since RDS has no public access and no per-IP allowlist. (Previously an SSH tunnel — SSH is now closed on the bastion; see `docs/aws_rds_setup.md` for the 2026-07-20 migration.)
 
 **Full guide:** [`docs/aws_rds_setup.md`](docs/aws_rds_setup.md)
@@ -209,6 +220,8 @@ Shared PostgreSQL 15 database on AWS RDS. All teammates connect to the same inst
 ---
 
 ## Team S3 access (AWS)
+
+> **Being decommissioned.** The AWS stack is being shut down (see [`docs/aws_decommission_runbook.md`](docs/aws_decommission_runbook.md)); this section works only until the bucket is deleted. Artifacts now live in Backblaze B2. The live app now uses the self-hosted stack in [`docs/selfhost_no_vm_runbook.md`](docs/selfhost_no_vm_runbook.md).
 
 Shared bucket for raw data, model artifacts, and MLflow artifacts. **Justin provisions IAM users** — teammates only need keys in `.env`.
 

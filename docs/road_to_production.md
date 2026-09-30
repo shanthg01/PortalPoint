@@ -1,5 +1,7 @@
 # Road to Production Roadmap
 
+> **AWS stack being decommissioned (2026-09-30).** Everything below describes the original AWS deployment (ECS/RDS/ElastiCache/CloudFront/S3) and is kept as history. The live app is now https://portalpoint.shanthg01.workers.dev on the self-hosted stack ([`selfhost_no_vm_runbook.md`](selfhost_no_vm_runbook.md)); teardown and the Terraform rebuild path are in [`aws_decommission_runbook.md`](aws_decommission_runbook.md).
+
 **Status:** Draft, 2026-07-13. Written to contextualize `docs/production_db_connectivity_plan.md`
 against every other productionalization workstream (hosting, secrets, CI/CD, monitoring, scheduled
 jobs) so DB connectivity isn't solved in isolation from things that depend on the same decisions

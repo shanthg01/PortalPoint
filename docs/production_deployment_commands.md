@@ -1,5 +1,7 @@
 # Production Deployment — CLI Command Reference
 
+> **AWS stack being decommissioned (2026-09-30).** Everything below describes the original AWS deployment (ECS/RDS/ElastiCache/CloudFront/S3) and is kept as history. The live app is now https://portalpoint.shanthg01.workers.dev on the self-hosted stack ([`selfhost_no_vm_runbook.md`](selfhost_no_vm_runbook.md)); teardown and the Terraform rebuild path are in [`aws_decommission_runbook.md`](aws_decommission_runbook.md).
+
 Companion to `docs/road_to_production.md`. Concrete commands for each phase, using
 AWS CLI v2, Docker CLI, and GitHub CLI. Placeholders in `<ANGLE_BRACKETS>` — everything
 else is a real value already confirmed in `docs/status/ARCHITECTURE_STATUS.md`.

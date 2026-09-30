@@ -1,5 +1,7 @@
 # PortalPoint Architecture Status
 
+> **AWS stack being decommissioned (2026-09-30).** Everything below describes the original AWS deployment (ECS/RDS/ElastiCache/CloudFront/S3) and is kept as history. The live app is now https://portalpoint.shanthg01.workers.dev on the self-hosted stack ([`selfhost_no_vm_runbook.md`](../selfhost_no_vm_runbook.md)); teardown and the Terraform rebuild path are in [`aws_decommission_runbook.md`](../aws_decommission_runbook.md).
+
 **Last updated:** July 21, 2026 (real ElastiCache Redis stood up in production, resolving the Cache row's deferred decision below; news-monitoring agent's `POST /api/agent/news-monitoring/run` fixed end-to-end — `is_admin` grant, `TAVILY_API_KEY`/`GOOGLE_API_KEY` secrets, and a real `errors` vs. `review_needed` split so an unmatched-player outcome no longer looks like a crash). Previously: July 20, 2026 — first production incident, same day as go-live: broken login/signup (12 migrations from the `origin/main` merge had never been applied to RDS) plus 5+ minute dashboard/fit/compare hangs from an unindexed `MAX(season)` scan; both root-caused and fixed same day, alongside frontend going live on S3+CloudFront, a CloudWatch alarm, and backend going live on ECS Fargate with SSH→SSM bastion migration. Earlier still: July 16, 2026 (news-monitoring agent RDS migrations applied; `program_events` write pipeline verified on shared RDS).
 **Scope:** Infrastructure, data stores, database schema, ingest, S3/MLflow, and runbook context.
 

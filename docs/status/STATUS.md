@@ -1,5 +1,7 @@
 # PortalPoint Status Index
 
+> **AWS stack being decommissioned (2026-09-30).** Everything below describes the original AWS deployment (ECS/RDS/ElastiCache/CloudFront/S3) and is kept as history. The live app is now https://portalpoint.shanthg01.workers.dev on the self-hosted stack ([`selfhost_no_vm_runbook.md`](../selfhost_no_vm_runbook.md)); teardown and the Terraform rebuild path are in [`aws_decommission_runbook.md`](../aws_decommission_runbook.md).
+
 **Last updated:** July 21, 2026 (real ElastiCache Redis live in production; news-monitoring agent fixed end-to-end — see the dated entry below)
 
 The original single status tracker has been split into three focused handoff docs:

@@ -1,6 +1,9 @@
 # AWS Decommission Runbook
 
-**Status:** Draft, 2026-09-30. Nothing below has been run yet.
+**Status (2026-09-30):** Steps 1, 2 and 2b done. Step 1 is on branch `aws-decommission`
+(`deploy.yml` disabled on GitHub). Step 2 inventory results are below. Step 2b: 70 resources imported into
+`infra/aws/`, final `terraform plan` = **No changes**. Nothing in AWS has been modified or deleted yet.
+Next: Step 0's remaining gates, then Step 3.
 
 This finishes the platform migration in `docs/selfhost_no_vm_runbook.md`: shut down the AWS stack
 (ECS/ALB/RDS/ElastiCache/EFS/CloudFront/S3) now that the free-tier stack (Render + Cloudflare Workers
@@ -40,6 +43,28 @@ can also codify the current Cloudflare/Render/OCI/B2 stack later.
 | IAM | roles `portalpoint-gha-deploy`, `portalpoint-ecs-execution`, `portalpoint-ecs-task`, `portalpoint-bastion-role`; group `PortalPoint-Dev` + `*-portalpoint-infra` users; GitHub OIDC provider |
 
 The biggest monthly costs are RDS, the NAT gateway, the ALB, ElastiCache and the Fargate task.
+
+**Step 2 inventory results (2026-09-30), what the docs didn't say:**
+- **September spend: $213** (RDS $113, NAT/"EC2-Other" $30, public IPv4 $17, ECS $17, ALB $15,
+  ElastiCache $11, bastion $8, Secrets $2, ECR $1). Nothing unaccounted for. No resources in
+  us-east-2/us-west-1/us-west-2; no EventBridge rules, Lambdas, Route53 zones, ACM certs or AWS Budgets.
+- **The VPC is the account's default VPC** (`vpc-0704fc22b655ba770`). It stays. The account also holds
+  **non-PortalPoint resources that must not be deleted:** the `UCB_MIDS_w205_Security` SG and the
+  `UCB` key pair.
+- **RDS:** 50GB gp3, **deletion protection is OFF**, `PubliclyAccessible=true` (but its SG only admits
+  the ECS task + bastion SGs), custom parameter group `portalpoint-pg15`, 7 days of automated snapshots.
+- **EFS is only 1.7MB**, so the Step 3b `mlruns.db` copy is trivial.
+- Extra resources beyond the doc table: CloudFront function `spa-routing`, S3 ownership controls,
+  3 teammate IAM users (`ajay`/`justin`/`yoko-portalpoint-infra`, all with active keys), SNS email
+  subscription to `shanthg01@berkeley.edu`. ECR holds 22 images; task-def revisions: backend 4,
+  migrate 6, modeling 23.
+- **Every `deploy.yml` run since ~2026-09-09 failed.** The OIDC deploy role still trusts
+  `repo:shanthg01/MIDS210-Capstone`, so the repo rename to PortalPoint broke it. The CloudFront site
+  has therefore been serving a stale pre-September build. `infra/aws/variables.tf` → `github_repo` notes
+  the fix for a rebuild.
+- **Credentials gotcha:** stale `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars (an old, invalid
+  key) override `aws login`. Unset them per shell. Terraform can't read `aws login` sessions
+  directly: `eval "$(aws configure export-credentials --format env)"` first (see `infra/aws/README.md`).
 
 ---
 
@@ -160,8 +185,9 @@ infra/aws/
 
 **Settings for safe destroy/rebuild:**
 - RDS: `skip_final_snapshot = false`, `final_snapshot_identifier = "portalpoint-db-final-2026-10"`,
-  `deletion_protection = true` in committed code (flipped to `false` only right before destroy, see Step 5),
-  `delete_automated_backups = true`. For a rebuild, set `snapshot_identifier` if the snapshot still exists.
+  `delete_automated_backups = true`. These are already applied to state (destroy reads them from state,
+  not config). `deletion_protection = false` matches live (it was never on). For a rebuild, set
+  `rds_restore_snapshot_identifier` if the snapshot still exists.
 - ECR: `force_delete = true`. S3 frontend bucket: `force_destroy = true`.
 - Secrets: `recovery_window_in_days = 7`.
 
@@ -265,12 +291,14 @@ is `destroy`. Don't "fix" the code to match the scream-test state.
 
 ```bash
 cd infra/aws
-# 1. Flip RDS deletion_protection to false in data.tf (it's true in the committed default), then:
-terraform apply -target=aws_db_instance.portalpoint      # applies only the protection change
-# 2. RDS is stopped from Step 4; a stopped instance can't be deleted
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+eval "$(aws configure export-credentials --format env)"
+# 1. RDS is stopped from Step 4; a stopped instance can't be deleted
 aws rds start-db-instance --db-instance-identifier portalpoint-db
 aws rds wait db-instance-available --db-instance-identifier portalpoint-db
-# 3. Review the plan: every resource should show "destroy", and none outside PortalPoint
+# 2. Confirm the final-snapshot settings are in state (they were applied during Step 2b):
+terraform state show aws_db_instance.portalpoint | grep -E "skip_final_snapshot|final_snapshot_identifier"
+# 3. Review the plan: every resource should show "destroy", 70 in total, none outside PortalPoint
 terraform plan -destroy -out=destroy.tfplan
 terraform apply destroy.tfplan
 ```
@@ -346,7 +374,6 @@ aws efs delete-file-system --file-system-id fs-0701ce18ffb150214
 ```bash
 aws rds start-db-instance --db-instance-identifier portalpoint-db   # only if still stopped from Step 4; a stopped instance can't be deleted
 aws rds wait db-instance-available --db-instance-identifier portalpoint-db
-aws rds modify-db-instance --db-instance-identifier portalpoint-db --no-deletion-protection --apply-immediately
 aws rds delete-db-instance --db-instance-identifier portalpoint-db \
   --final-db-snapshot-identifier portalpoint-db-final-2026-10 --delete-automated-backups
 aws rds wait db-instance-deleted --db-instance-identifier portalpoint-db

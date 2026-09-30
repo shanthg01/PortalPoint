@@ -85,3 +85,11 @@ ssm-tunnel-params.json
 ssm-cache-tunnel-params.json
 gha-frontend-deploy-policy.json
 efs-mlflow-policy.json
+
+# Terraform (infra/aws) -- state can contain secret values; never commit it
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+infra/aws/*.log

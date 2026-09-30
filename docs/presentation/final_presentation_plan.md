@@ -389,7 +389,7 @@ Placeholders to fill before the real run: anything in `[BRACKETS]`. Three are op
 - `docs/solution_architecture.mmd` — **the real source diagram for Section 5**, rewritten this pass from `CLAUDE.md`'s Production Deployment facts. Good backup for Q&A depth beyond Slide 5.1's summary — includes the explicit "Planned / Not Implemented" cluster (Airflow, Celery, WebSocket, Prometheus, drift monitoring) with dashed connectors showing where each would have plugged in.
 - `docs/diagram_2_solution_architecture.md` — **older ASCII-art planning diagram, still aspirational and NOT fixed this pass.** Describes infrastructure that was never built (WebSocket service, XGBoost model-serving, multi-instance ECS, Celery/RabbitMQ, Airflow). Do not use for Section 5 or Q&A — kept for historical reference only.
 - `docs/road_to_production.md` — deployment history
-- Live app: `https://d331zwrxbrp79d.cloudfront.net`
+- Live app: `https://portalpoint.shanthg01.workers.dev` (moved off AWS CloudFront `d331zwrxbrp79d.cloudfront.net`, which is being decommissioned; the backend is on Render's free tier, so hit it once before presenting to avoid a ~30-50s cold start)
 
 ### A.3 — Backup Slides (if Q&A needs depth)
 - Full 9-model table with versions and MLflow status.

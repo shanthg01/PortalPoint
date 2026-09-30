@@ -1,8 +1,12 @@
 name: deploy
 
+# AWS stack (ECS/ECR/CloudFront) is being decommissioned -- see
+# docs/aws_decommission_runbook.md. Push-to-main trigger removed so merges no
+# longer deploy to AWS; kept as manual-dispatch only as the deploy path for a
+# rebuild from infra/aws/ (runbook: "Rebuilding the AWS stack"). Live app is
+# now Render + Cloudflare Workers (docs/selfhost_no_vm_runbook.md).
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   id-token: write

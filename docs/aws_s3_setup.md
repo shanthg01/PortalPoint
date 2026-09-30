@@ -1,5 +1,7 @@
 # AWS S3 — Team Setup
 
+> **AWS stack being decommissioned (2026-09-30).** Everything below describes the original AWS deployment (ECS/RDS/ElastiCache/CloudFront/S3) and is kept as history. The live app is now https://portalpoint.shanthg01.workers.dev on the self-hosted stack ([`selfhost_no_vm_runbook.md`](selfhost_no_vm_runbook.md)); teardown and the Terraform rebuild path are in [`aws_decommission_runbook.md`](aws_decommission_runbook.md).
+
 Shared S3 bucket for raw ingest data, model artifacts, and (eventually) MLflow artifact storage. **Local-first dev** — notebooks and scripts on your laptop read/write S3 via credentials in `.env`.
 
 ---

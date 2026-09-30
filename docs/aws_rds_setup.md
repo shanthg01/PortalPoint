@@ -1,5 +1,7 @@
 # AWS RDS — Team Setup
 
+> **AWS stack being decommissioned (2026-09-30).** Everything below describes the original AWS deployment (ECS/RDS/ElastiCache/CloudFront/S3) and is kept as history. The live app is now https://portalpoint.shanthg01.workers.dev on the self-hosted stack ([`selfhost_no_vm_runbook.md`](selfhost_no_vm_runbook.md)); teardown and the Terraform rebuild path are in [`aws_decommission_runbook.md`](aws_decommission_runbook.md).
+
 Shared PostgreSQL 15 database on AWS RDS. All teammates connect to the same instance — no local Postgres required.
 
 RDS has **no public access and no per-IP allowlist** — it only accepts connections from inside the VPC, specifically from a bastion EC2 host. Everyone reaches it through an **AWS SSM Session Manager port-forwarding tunnel** to the bastion. This replaced an earlier per-teammate static-IP allowlist (broke on network changes), and later replaced the SSH-based bastion tunnel itself (2026-07-20) — **port 22 is now closed entirely** on the bastion, no `.pem` key is used for day-to-day access anymore. SSM gives the same local-tunnel effect as the old `ssh -L` command, but authenticates via IAM instead of an SSH key, and every session is logged in CloudTrail against the IAM identity that opened it.

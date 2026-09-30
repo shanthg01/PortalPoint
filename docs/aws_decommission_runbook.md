@@ -13,6 +13,14 @@ new stack. **Step 4 scream test started 2026-09-30:** ECS at 0, bastion + RDS st
 and NAT deleted, all confirmed settled; the new stack was verified healthy afterwards. **RDS auto-restarts on
 ~2026-10-07** (AWS's 7-day stop limit), so run Step 5 before then or stop it again. Earliest Step 5: 2026-10-02/03.
 
+**⚠️ New gate found 2026-09-30: VM off-site backups were failing.** Every nightly B2 upload from
+2026-09-14 on failed with "storage cap exceeded". The bucket is versioned, so `mc rm` only hid old dumps,
+and the hidden versions filled the 10GB free tier. The newest off-site dump is from 2026-09-13. Fixed in
+`scripts/selfhost/backup_cron.sh` (`mc rm --versions --force`) and the two hidden dumps were purged, but
+uploads were **still** rejected right after, which means either B2 recounts slowly or another bucket
+shares the account cap. **Don't run Step 5 until a fresh off-site dump is confirmed in B2** (check with
+`mc ls offsite/portalpoint/` on the VM, or the cron log `/var/log/portalpoint-backup.log`).
+
 This finishes the platform migration in `docs/selfhost_no_vm_runbook.md`: shut down the AWS stack
 (ECS/ALB/RDS/ElastiCache/EFS/CloudFront/S3) now that the free-tier stack (Render + Cloudflare Workers
 + Oracle VM Postgres + Upstash + B2) is live. The order matters: check the gates, freeze deploys,

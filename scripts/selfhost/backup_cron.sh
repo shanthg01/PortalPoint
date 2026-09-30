@@ -16,15 +16,17 @@
 #   1. `pg_dump -Fc` the self-hosted Postgres DB, into a timestamped file in $BACKUP_DIR.
 #   2. Retention: keeps the last $BACKUP_RETAIN_COUNT dumps in $BACKUP_DIR (default 7),
 #      deletes older ones.
-#   3. Off-site push (optional): if the BACKUP_REMOTE_* vars below are all set, uses `mc`
-#      (the MinIO client — already a required dependency elsewhere in this stack, so no new
-#      tooling) to push the just-created dump to a configurable S3-compatible off-site
-#      endpoint (e.g. Backblaze B2's S3-compatible API, or another MinIO/S3-compatible
-#      target). If any BACKUP_REMOTE_* var is unset, the off-site push is skipped and this is
-#      logged clearly — it is NOT a fatal error, local-only backup still counts as success.
-#   4. Remote retention (only runs if step 3 ran): same "keep last N, delete older" policy as
-#      step 2, applied to the off-site bucket via $BACKUP_REMOTE_RETAIN_COUNT — without this,
-#      off-site storage grows forever since step 3 only ever adds objects.
+#   3. Off-site push (optional, only if the BACKUP_REMOTE_* vars below are all set): prunes the
+#      off-site bucket DOWN TO $BACKUP_REMOTE_RETAIN_COUNT-1 dumps FIRST (making room), then
+#      uses `mc` (the MinIO client — already a required dependency elsewhere in this stack) to
+#      push the just-created dump, then prunes back down to $BACKUP_REMOTE_RETAIN_COUNT as a
+#      safety net. Pruning before the push, not just after, matters: a provider that rejects
+#      writes once a storage quota is hit (e.g. Backblaze B2's free 10GB tier) would otherwise
+#      deadlock — the push that's supposed to trigger cleanup never completes, so cleanup never
+#      runs either. This happened for real (2026-09-11) and had been silently failing every
+#      night for a week before anyone noticed. If any BACKUP_REMOTE_* var is unset, the whole
+#      off-site step is skipped and this is logged clearly — it is NOT a fatal error, local-only
+#      backup still counts as success.
 #
 # REQUIRED ENV VARS (self-hosted Postgres connection to back up)
 #   SELFHOST_DB_NAME        Database name
@@ -50,7 +52,7 @@
 #   BACKUP_REMOTE_SECRET_KEY     Off-site secret access key.
 #   BACKUP_REMOTE_MC_ALIAS       Local `mc` alias name to register for the off-site target.
 #                                Default: offsite
-#   BACKUP_REMOTE_RETAIN_COUNT   Number of most-recent dumps to keep in the off-site bucket,
+#   BACKUP_REMOTE_RETAIN_COUNT   Number of most-recent dumps to keep in the off-site bucket (min 2),
 #                                same "keep last N, delete older" policy as BACKUP_RETAIN_COUNT
 #                                but applied remotely. Default: 3 -- deliberately lower than the
 #                                local default (7). Real incident (2026-09-11): with no remote
@@ -126,8 +128,11 @@ if ! [[ "$BACKUP_RETAIN_COUNT" =~ ^[0-9]+$ ]] || [[ "$BACKUP_RETAIN_COUNT" -lt 1
   exit 1
 fi
 
-if ! [[ "$BACKUP_REMOTE_RETAIN_COUNT" =~ ^[0-9]+$ ]] || [[ "$BACKUP_REMOTE_RETAIN_COUNT" -lt 1 ]]; then
-  echo "ERROR: BACKUP_REMOTE_RETAIN_COUNT must be a positive integer (got '${BACKUP_REMOTE_RETAIN_COUNT}')." >&2
+# Minimum 2, not 1: the pre-push prune (step 4a) trims to RETAIN_COUNT-1 *before* uploading,
+# so a value of 1 would delete the only off-site dump before the new one is safely stored --
+# a failed upload would then leave nothing off-site at all.
+if ! [[ "$BACKUP_REMOTE_RETAIN_COUNT" =~ ^[0-9]+$ ]] || [[ "$BACKUP_REMOTE_RETAIN_COUNT" -lt 2 ]]; then
+  echo "ERROR: BACKUP_REMOTE_RETAIN_COUNT must be an integer >= 2 (got '${BACKUP_REMOTE_RETAIN_COUNT}')." >&2
   exit 1
 fi
 
@@ -199,27 +204,47 @@ fi
 log "Off-site push enabled — registering mc alias '${BACKUP_REMOTE_MC_ALIAS}' -> ${BACKUP_REMOTE_ENDPOINT}"
 mc alias set "$BACKUP_REMOTE_MC_ALIAS" "$BACKUP_REMOTE_ENDPOINT" "$BACKUP_REMOTE_ACCESS_KEY" "$BACKUP_REMOTE_SECRET_KEY"
 
+prune_remote_dumps() {
+  # Prunes down to $1 remaining objects (oldest deleted first). Used both
+  # before and after the push -- see the real deadlock this fixes, below.
+  local keep="$1"
+  mapfile -t remote_dumps < <(mc find "${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/" \
+    --name 'portalpoint_*.dump' 2>/dev/null | sort)
+  local total_remote_dumps="${#remote_dumps[@]}"
+  if [[ "$total_remote_dumps" -gt "$keep" ]]; then
+    local num_to_delete=$((total_remote_dumps - keep))
+    log "Found ${total_remote_dumps} remote dump(s), deleting ${num_to_delete} oldest to retain ${keep}."
+    for ((i = 0; i < num_to_delete; i++)); do
+      log "Deleting old off-site backup (all versions): ${remote_dumps[$i]}"
+      # --versions --force: a plain `mc rm` on a versioned bucket (Backblaze B2's default
+      # "keep all versions") only adds a delete marker -- the old version stays stored and
+      # keeps counting toward the storage cap. Real incident: hidden dumps filled the 10GB
+      # free tier and every upload from 2026-09-14 to 2026-09-30 failed with
+      # "storage cap exceeded" even though only 5GB of dumps were visible.
+      mc rm --versions --force "${remote_dumps[$i]}"
+    done
+  else
+    log "Found ${total_remote_dumps} remote dump(s), within limit of ${keep}. Nothing deleted."
+  fi
+}
+
+# ---- step 4a: prune remote BEFORE pushing, down to RETAIN_COUNT-1 -----------------------------
+# Real incident (2026-09-11): pruning only *after* the push (the original order) is a deadlock
+# once the bucket is at/near quota -- Backblaze B2 rejects a write that would exceed the free
+# 10GB tier, so the push that was supposed to trigger cleanup never completes, and cleanup
+# never runs either. This had been silently failing every night for a week (confirmed: local
+# dumps existed for every night, but the off-site bucket only had the last few pre-quota
+# ones) since nothing surfaces a failed `mc cp` unless someone reads the cron log. Pruning
+# down to one slot below the limit *first* guarantees there's always room for the new dump.
+log "Pre-push remote retention: making room for the new dump"
+prune_remote_dumps "$((BACKUP_REMOTE_RETAIN_COUNT - 1))"
+
 log "Pushing ${DUMP_FILE} -> ${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/"
 mc cp "$DUMP_FILE" "${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/"
 
-# ---- step 4: remote retention — keep the last N dumps off-site, delete older ones ------------
-# `mc cp` above only ever adds objects — with no cleanup here, off-site storage grows forever.
-# Real incident (2026-09-11): 4 unpruned dumps at ~2.57GB each already exceeded Backblaze B2's
-# 10GB free tier after 2 days of the nightly cron running, since only local retention existed.
-log "Applying remote retention policy: keep last ${BACKUP_REMOTE_RETAIN_COUNT} dump(s) in ${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}"
-mapfile -t remote_dumps < <(mc find "${BACKUP_REMOTE_MC_ALIAS}/${BACKUP_REMOTE_BUCKET}/" \
-  --name 'portalpoint_*.dump' 2>/dev/null | sort)
-total_remote_dumps="${#remote_dumps[@]}"
-
-if [[ "$total_remote_dumps" -gt "$BACKUP_REMOTE_RETAIN_COUNT" ]]; then
-  num_to_delete=$((total_remote_dumps - BACKUP_REMOTE_RETAIN_COUNT))
-  log "Found ${total_remote_dumps} remote dump(s), deleting ${num_to_delete} oldest to retain ${BACKUP_REMOTE_RETAIN_COUNT}."
-  for ((i = 0; i < num_to_delete; i++)); do
-    log "Deleting old off-site backup: ${remote_dumps[$i]}"
-    mc rm "${remote_dumps[$i]}"
-  done
-else
-  log "Found ${total_remote_dumps} remote dump(s), within retention limit of ${BACKUP_REMOTE_RETAIN_COUNT}. Nothing deleted."
-fi
+# ---- step 4b: safety-net prune AFTER pushing, back down to RETAIN_COUNT -----------------------
+# Should be a no-op given step 4a already made exactly one slot of room -- kept as a cheap
+# second pass in case of concurrent runs, a manually-added object, or a changed retain count.
+prune_remote_dumps "$BACKUP_REMOTE_RETAIN_COUNT"
 
 log "Off-site push complete. Backup finished: ${DUMP_FILE}"

@@ -21,6 +21,10 @@ name: keep-render-warm
 # still can't hold a tight enough cadence, the real fix is an external
 # uptime monitor (cron-job.org / UptimeRobot free tier) -- those are built
 # for reliable frequent pings, GH Actions schedule explicitly is not.
+#
+# Timeout raised 120s -> 180s (2026-10-05): cold starts now take ~100-150s
+# (measured 98s and >150s), so a ping landing on a cold container was
+# failing with curl exit 28 (3 of 159 runs) even though Render recovered.
 
 on:
   schedule:
@@ -33,7 +37,7 @@ jobs:
     steps:
       - name: Ping backend health endpoint
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 https://portalpoint.onrender.com/health)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 180 https://portalpoint.onrender.com/health)
           echo "Response: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "::warning::Health check returned $STATUS instead of 200"

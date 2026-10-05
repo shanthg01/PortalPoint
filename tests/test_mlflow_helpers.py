@@ -60,3 +60,13 @@ def test_second_plain_artifact_version_follows_gate(client, tmp_path):
     assert not result.promoted
     assert client.get_model_version_by_alias("scorer", "champion").run_id == first
     assert len(client.search_model_versions("name='scorer'")) == 2
+
+
+def test_run_with_no_artifacts_is_not_registered(client, tmp_path):
+    """A failed (warn-only) artifact upload must not produce an empty @champion."""
+    with mlflow.start_run() as run:
+        mlflow.log_metric("em_rmse", 1.8)  # metrics logged, artifacts never made it
+    with pytest.raises(mlflow.exceptions.MlflowException, match="No artifacts"):
+        maybe_promote(client, "scorer", run.info.run_id, "team_rating_models", "em_rmse", 1.8,
+                      higher_is_better=False)
+    assert client.search_model_versions("name='scorer'") == []

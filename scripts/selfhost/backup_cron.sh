@@ -54,14 +54,13 @@
 #                                Default: offsite
 #   BACKUP_REMOTE_RETAIN_COUNT   Number of most-recent dumps to keep in the off-site bucket (min 2),
 #                                same "keep last N, delete older" policy as BACKUP_RETAIN_COUNT
-#                                but applied remotely. Default: 3 -- deliberately lower than the
-#                                local default (7). Real incident (2026-09-11): with no remote
-#                                retention at all, 4 uncleaned dumps at ~2.57GB each already
-#                                exceeded Backblaze B2's 10GB free tier after only 2 days of the
-#                                nightly cron running. At 3 retained (~7.7GB at today's dump
-#                                size), there's headroom for the DB to grow before hitting the
-#                                cap again -- lower this further (or raise it if paying for
-#                                storage) if the dump size grows materially.
+#                                but applied remotely. Default: 2 -- sized for Backblaze B2's 10GB
+#                                (10^10 bytes, ~9.3GiB) free tier, which also holds the MLflow
+#                                artifacts. Real incidents: 2026-09-11 (no remote retention, 4
+#                                dumps at ~2.57GB filled the cap) and 2026-09-30 (3 retained +
+#                                the in-flight upload hit the cap; B2 also counts storage over
+#                                the day, so freed space isn't usable immediately). 2 keeps the
+#                                bucket at ~5.2GB steady state. Raise it only if paying for storage.
 #
 # FLAGS
 #   -h, --help              Print this help and exit 0.
@@ -108,7 +107,7 @@ SELFHOST_DB_PORT="${SELFHOST_DB_PORT:-5432}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_RETAIN_COUNT="${BACKUP_RETAIN_COUNT:-7}"
 BACKUP_REMOTE_MC_ALIAS="${BACKUP_REMOTE_MC_ALIAS:-offsite}"
-BACKUP_REMOTE_RETAIN_COUNT="${BACKUP_REMOTE_RETAIN_COUNT:-3}"
+BACKUP_REMOTE_RETAIN_COUNT="${BACKUP_REMOTE_RETAIN_COUNT:-2}"
 
 missing=()
 for var in SELFHOST_DB_NAME SELFHOST_DB_USER SELFHOST_DB_PASSWORD; do

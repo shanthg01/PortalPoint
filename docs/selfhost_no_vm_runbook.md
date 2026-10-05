@@ -152,6 +152,11 @@ matters because Vite bakes `VITE_API_BASE_URL` into the JS bundle at
 own build pipeline, if it runs at all, doesn't know this variable exists,
 so a dashboard/API env var setting for it would be a no-op there anyway.
 
+**✅ Resolved 2026-09-30: the native Workers Builds integration below was disconnected**
+(dashboard → Workers & Pages → portalpoint → Settings → Build), after it shipped a broken
+bundle once more on a PR. `deploy-cloudflare-frontend.yml` is now the only frontend deploy
+path. History kept below for context.
+
 **⚠️ Real incident (2026-09-09): Cloudflare's own native GitHub-connected
 "Workers Builds" is ALSO active for this service and fires on every push to
 `main`, independent of anything in this repo.** Confirmed via the Workers

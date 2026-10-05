@@ -69,6 +69,8 @@ resource "aws_cloudfront_function" "redirect" {
 
 locals {
   redirect = var.redirect_to != null
+  # /api/* -> ALB only in normal serving mode, and only once the ALB's DNS name is known.
+  api_route = !local.redirect && var.alb_origin_domain != null
 
   # AWS managed policies
   cache_policy_caching_optimized = "658327ea-f89d-4fab-a63d-7e88639e58f6"
@@ -90,11 +92,14 @@ resource "aws_cloudfront_distribution" "main" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
+  # The ALB is wired in by plain string (var.alb_origin_domain), NOT a reference to
+  # aws_lb.main: any reference makes CloudFront depend on the backend, so a targeted
+  # destroy of the ALB would cascade into destroying this redirector too.
   dynamic "origin" {
-    for_each = local.redirect ? [] : [1]
+    for_each = local.api_route ? [1] : []
     content {
       origin_id   = "alb-backend"
-      domain_name = aws_lb.main.dns_name
+      domain_name = var.alb_origin_domain
       custom_origin_config {
         http_port              = 80
         https_port             = 443
@@ -119,7 +124,7 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   dynamic "ordered_cache_behavior" {
-    for_each = local.redirect ? [] : [1]
+    for_each = local.api_route ? [1] : []
     content {
       path_pattern             = "/api/*"
       target_origin_id         = "alb-backend"

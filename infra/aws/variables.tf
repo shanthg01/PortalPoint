@@ -80,3 +80,14 @@ variable "redirect_to" {
   type        = string
   default     = "https://portalpoint.shanthg01.workers.dev"
 }
+
+variable "alb_origin_domain" {
+  description = <<-EOT
+    DNS name of the ALB, for CloudFront's /api/* origin in normal serving mode. A plain
+    string on purpose (see edge.tf). Rebuild flow: first apply with this null (CloudFront
+    serves the SPA only), then set it to `terraform output -raw alb_dns_name` and apply again.
+    Ignored in redirect mode.
+  EOT
+  type        = string
+  default     = null
+}

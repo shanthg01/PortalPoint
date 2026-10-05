@@ -1,0 +1,29 @@
+# piq.run.yaml — how to run and verify this project.
+# Read by the piq-core pre-commit hook (check-tests-and-secrets.js) to find the
+# test command and its timeout. Keep this accurate — a stale run contract breaks
+# verification silently.
+
+start:
+  # Same suite CI runs (.github/workflows/test.yml). DB-backed tests need a local
+  # Postgres set up the same way CI does it:
+  #   docker compose --profile local-db up -d
+  #   uv run alembic upgrade head && uv run python scripts/seed_test_data.py
+  # with .env's DATABASE_URL pointing at that local DB. Never point tests at the
+  # production VM database -- they write to it (test users, preferences, shortlists).
+  command: "uv run --with pytest pytest tests/ -q -p no:cacheprovider"
+  workingDir: "."
+  env: ".env"
+
+healthCheck:
+  kind: "command"
+  command: "uv run --with pytest pytest tests/ -q -p no:cacheprovider"
+  # The full suite takes ~3.5-8 min locally (750 tests incl. DB-backed integration
+  # tests); the hook's 120s default always timed out.
+  timeoutSeconds: 590
+
+testData:
+  fixturePath: "./scripts/seed_test_data.py"
+  description: >
+    Deterministic, idempotent seed rows the integration tests assume exist
+    (school_id 9900301/9900302, player_id 1-8/42/101, plus fit scores,
+    projections, archetypes). Synthetic test fixtures, never real user data.

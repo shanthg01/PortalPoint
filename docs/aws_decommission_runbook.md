@@ -1,6 +1,24 @@
 # AWS Decommission Runbook
 
-**Status (2026-09-30):** Steps 1, 2 and 2b done. Step 1 is on branch `aws-decommission`
+**Status (2026-10-05): DECOMMISSIONED.** Step 5 ran 2026-10-05: a targeted `terraform destroy`
+removed 61 resources (ElastiCache and NAT were already gone from the scream test). AWS spend drops
+from ~$7/day to ~$0. The `portalpoint-bastion` key pair was deleted by hand.
+**Still in the account, on purpose:**
+- **CloudFront `E2HF7HKH8Y1FKD` + `portalpoint-frontend` bucket:** the 301 redirect to the Workers
+  URL (8 resources still in Terraform state, about $0). Destroy in a few months with
+  `terraform destroy` from `infra/aws/`, once old links have aged out.
+- **RDS final snapshot `portalpoint-db-final-2026-10`** (50GB, about $4/month): delete on or after
+  **2026-11-04**, after restore-testing one VM backup (Step 9).
+- **5 secrets:** scheduled for deletion; they auto-delete 2026-10-12 (7-day window).
+- Non-PortalPoint resources (default VPC, `UCB_MIDS_w205_Security` SG, `UCB` key pair): untouched.
+
+One fix was needed during Step 5: the first destroy plan would also have destroyed CloudFront. The
+redirect-mode code still *referenced* `aws_lb.main` (unused, but Terraform counts any reference as
+a dependency), and the state had recorded those stale dependencies. CloudFront now gets the ALB
+address as a plain variable (`alb_origin_domain`), and a no-op targeted apply refreshed the stored
+dependencies before the destroy.
+
+**Earlier status (2026-09-30):** Steps 1, 2 and 2b done. Step 1 is on branch `aws-decommission`
 (`deploy.yml` disabled on GitHub). Step 2 inventory results are below. Step 2b: 70 resources imported into
 `infra/aws/`, final `terraform plan` = **No changes**. Nothing in AWS has been modified or deleted yet.
 **Later same day:** Step 3a done (40/42 tables identical; only gap: 1 user who signed up on the
@@ -500,7 +518,7 @@ The code recreates the infrastructure, but the data and secret values have to be
 1. **Credentials + state:** log into the infra account, `cd infra/aws && terraform init`.
 2. **Database source:** set `snapshot_identifier` in `data.tf` if the RDS final snapshot still exists
    (fastest). Otherwise leave it empty; the DB is restored from the B2 dump in step 5.
-3. **`terraform apply`.** It creates the VPC pieces, RDS, ElastiCache, EFS, ECR, ECS, ALB,
+3. **`terraform apply`** with `redirect_to = null`. It creates the VPC pieces, RDS, ElastiCache, EFS, ECR, ECS, ALB,
    CloudFront, IAM and empty secrets. ECS tasks will fail until steps 4–5 are done. That's expected.
 4. **Secret values:** `aws secretsmanager put-secret-value` for `database-url` (new RDS hostname),
    `database-master-url`, `jwt-secret`, `tavily-api-key`, `google-api-key`.
@@ -510,6 +528,8 @@ The code recreates the infrastructure, but the data and secret values have to be
 6. **Deploy:** re-enable and dispatch `deploy.yml` (`gh workflow enable deploy && gh workflow run deploy`).
    It builds/pushes the image, runs migrations, rolls ECS, and syncs the frontend. The new CloudFront
    distribution ID must be updated in `deploy.yml` first (and the S3 bucket name, if changed).
+6b. **Wire CloudFront's `/api/*` to the new ALB:** set `alb_origin_domain` to
+   `terraform output -raw alb_dns_name` and run `terraform apply` again (a plain string on purpose, see `edge.tf`).
 7. **Point things at the new URLs:** CloudFront gets a new `dxxxx.cloudfront.net` domain, and RDS/ALB
    get new hostnames. Update README, the landing page and CORS. A custom domain would make this step unnecessary.
 8. **Verify:** `/ready` is healthy on the ALB target group, and the frontend loads through CloudFront.

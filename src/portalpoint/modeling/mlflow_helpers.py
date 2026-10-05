@@ -114,6 +114,38 @@ def setup_mlflow(experiment_name: str) -> MlflowClient:
     return client
 
 
+def _register_version(client: MlflowClient, model_name: str, run_id: str, artifact_path: str):
+    """Register `runs:/<run_id>/<artifact_path>` as a new version of `model_name`.
+
+    MLflow 3's `register_model` only accepts a "logged model" (something logged via
+    `mlflow.<flavor>.log_model`). Several scripts here instead log plain artifact files
+    under `artifact_path` (e.g. run_team_rating_projection.py's raw off/def `.pkl`s),
+    which worked under MLflow 2 but now fails with "Unable to find a logged_model with
+    artifact_path ...". For those, fall back to `create_model_version` pointing straight
+    at the artifact directory -- which is all the loaders here read (they resolve the
+    alias to a run_id and download artifacts by path, never via a model flavor).
+    """
+    try:
+        return mlflow.register_model(f"runs:/{run_id}/{artifact_path}", model_name)
+    except MlflowException as e:
+        if "logged_model" not in str(e):
+            raise
+        # The logged_model error was also what stopped a run with NO artifacts from being
+        # registered. Callers log artifacts through warn-only wrappers (e.g.
+        # _safe_log_artifact), so a failed upload must not become an empty @champion.
+        if not client.list_artifacts(run_id, artifact_path):
+            raise MlflowException(
+                f"No artifacts under '{artifact_path}' for run {run_id}; refusing to register "
+                f"an empty model version (did the artifact upload fail?)"
+            ) from e
+    try:
+        client.get_registered_model(model_name)  # register_model usually creates it before failing
+    except MlflowException:
+        client.create_registered_model(model_name)
+    source = f"{client.get_run(run_id).info.artifact_uri}/{artifact_path}"
+    return client.create_model_version(model_name, source=source, run_id=run_id)
+
+
 def maybe_promote(
     client: MlflowClient,
     model_name: str,
@@ -141,8 +173,7 @@ def maybe_promote(
     no "Staging" equivalent to set, since nothing in this codebase ever read
     that label besides this function's own returned string.
     """
-    model_uri = f"runs:/{run_id}/{artifact_path}"
-    mv = mlflow.register_model(model_uri, model_name)
+    mv = _register_version(client, model_name, run_id, artifact_path)
 
     try:
         champion = client.get_model_version_by_alias(model_name, alias)
